@@ -164,9 +164,5 @@ cat ~/tubes_k11/data/silver/energy_weather_clean/*.snappy.parquet | mc pipe loca
 ```
 ---
 
-docker exec -it tubes-k11-spark spark-submit /app/scripts/04_modeling.py
-```
----
-
 
 
