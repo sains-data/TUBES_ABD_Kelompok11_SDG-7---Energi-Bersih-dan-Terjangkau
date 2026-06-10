@@ -1,4 +1,4 @@
-## 🔍 1. Eksplorasi Dataset
+## 1. Eksplorasi Dataset
 Berdasarkan hasil analisis eksploratif (EDA) pada *raw data*, berikut adalah karakteristik dataset yang digunakan:
 * **Target Prediksi (Label):** `total load actual` (Beban listrik aktual dalam Megawatt/MW). Distribusi target ini tergolong stabil dan bersih tanpa *outlier* ekstrem.
 * **Fitur Prediktor Numerik (Cuaca & Waktu):** `temp` (suhu), `pressure` (tekanan udara), `humidity`, `wind_speed`, serta fitur waktu yang diekstrak (`hour`, `day_of_week`, `is_weekend`). 
@@ -9,7 +9,7 @@ Berdasarkan hasil analisis eksploratif (EDA) pada *raw data*, berikut adalah kar
 
 ---
 
-## 🛠️ 2. Set-Up Infrastruktur (MinIO & Apache Spark)
+## 2. Set-Up Infrastruktur (MinIO & Apache Spark)
 
 ### 2.1 Buat Struktur Folder & Unduh Dataset
 ```bash
@@ -94,7 +94,7 @@ docker build -t tubes-k11-spark:3.5.5 .
 docker compose up -d
 ```
 
-### 3. Bronze Layer (MinIo Upload)
+## 3. Bronze Layer (MinIo Upload)
 Buka browser di Windows, masuk ke http://localhost:9001 (Login: admin / admin123).
 Lalu buat 3 buah bucket: bronze, silver, gold.
 Serta jalankan perintah berikut di terminal:
@@ -107,5 +107,55 @@ sudo mv mc /usr/local/bin/
 mc alias set local http://localhost:9000 admin admin123
 mc cp ~/tubes_k11/data/raw-data/energy_dataset.csv local/bronze/
 mc cp ~/tubes_k11/data/raw-data/weather_features.csv local/bronze/
+```
+
+## 4. Silver Layer (Cleaning & IQR Outlier)
+```bash
+nano ~/tubes_k11/scripts/02_silver.py
+```
+Isi dengan:
+```bash
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+spark = SparkSession.builder.appName("tubes_sains_data_silver").master("local[*]").getOrCreate()
+spark.sparkContext.setLogLevel("WARN")
+
+df_energy = spark.read.option("header", "true").option("inferSchema", "true").csv("/data/raw-data/energy_dataset.csv")
+df_weather = spark.read.option("header", "true").option("inferSchema", "true").csv("/data/raw-data/weather_features.csv")
+
+# 1. FORWARD FILL (Missing Values)
+window_energy = Window.orderBy("time").rowsBetween(Window.unboundedPreceding, 0)
+numeric_energy = [c for c, t in df_energy.dtypes if t in ("double", "float", "int", "bigint")]
+for c in numeric_energy:
+    df_energy = df_energy.withColumn(c, F.last(F.col(c), ignorenulls=True).over(window_energy))
+
+window_weather = Window.orderBy("dt_iso").rowsBetween(Window.unboundedPreceding, 0)
+numeric_weather = [c for c, t in df_weather.dtypes if t in ("double", "float", "int", "bigint")]
+for c in numeric_weather:
+    df_weather = df_weather.withColumn(c, F.last(F.col(c), ignorenulls=True).over(window_weather))
+
+# 2. JOIN ENERGY + WEATHER
+df_weather = df_weather.withColumnRenamed("dt_iso", "time")
+df_clean = df_energy.join(df_weather, on="time", how="inner")
+
+# 3. EKSTRAKSI FITUR WAKTU (Outlier IQR dipindah ke Modeling)
+df_silver = df_clean \
+    .withColumn("timestamp",   F.to_timestamp(F.col("time"))) \
+    .withColumn("hour",        F.hour("timestamp")) \
+    .withColumn("day_of_week", F.dayofweek("timestamp")) \
+    .withColumn("month",       F.month("timestamp")) \
+    .withColumn("year",        F.year("timestamp")) \
+    .withColumn("is_weekend",  (F.dayofweek("timestamp").isin([1, 7])).cast("int"))
+
+df_silver.write.mode("overwrite").parquet("/data/silver/energy_weather_clean")
+print("\n=== Silver Layer Selesai (Tanpa Data Leakage) ✓ ===")
+spark.stop()
+```
+Eksekusi:
+```bash
+docker exec -it tubes-k11-spark spark-submit /app/scripts/02_silver.py
+cat ~/tubes_k11/data/silver/energy_weather_clean/*.snappy.parquet | mc pipe local/silver/energy_weather_clean/data.snappy.parquet
 ```
 
