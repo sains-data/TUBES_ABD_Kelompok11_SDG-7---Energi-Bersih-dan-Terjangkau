@@ -164,5 +164,66 @@ cat ~/tubes_k11/data/silver/energy_weather_clean/*.snappy.parquet | mc pipe loca
 ```
 ---
 
+ 5. Gold Layer (One-Hot Encoding & Feature Importance)
+bash
+nano ~/tubes_k11/scripts/03_gold.py
 
+Isi dengan:
+bash
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.ml.feature import VectorAssembler, StringIndexer, OneHotEncoder
+from pyspark.ml.regression import DecisionTreeRegressor
+
+spark = SparkSession.builder.appName("tubes_k11_gold").master("local[*]").getOrCreate()
+spark.sparkContext.setLogLevel("WARN")
+
+# Tanpa dropna() global agar kolom yang 100% kosong tidak merusak dataset
+df_silver = spark.read.parquet("/data/silver/energy_weather_clean")
+df_silver.createOrReplaceTempView("energy_weather")
+
+# 1. DESCRIPTIVE ANALYTICS
+df_per_jam = spark.sql("SELECT hour, ROUND(AVG(`total load actual`), 2) AS avg_load_actual, ROUND(AVG(`total load forecast`), 2) AS avg_load_forecast FROM energy_weather GROUP BY hour ORDER BY hour")
+df_per_jam.write.mode("overwrite").parquet("/data/gold/agg_per_jam")
+
+df_renewable = spark.sql("SELECT year, ROUND(AVG(`generation solar`), 2) AS avg_solar, ROUND(AVG(`generation wind onshore`), 2) AS avg_wind_onshore, ROUND(AVG(`generation hydro run-of-river and poundage`), 2) AS avg_hydro, ROUND(AVG(`total load actual`), 2) AS avg_total_load FROM energy_weather GROUP BY year ORDER BY year")
+df_renewable.write.mode("overwrite").parquet("/data/gold/agg_renewable")
+
+# 2. FEATURE ENGINEERING (Ubah Kategori Kota jadi Angka)
+numeric_features = ["temp", "pressure", "humidity", "wind_speed", "hour", "day_of_week", "is_weekend"]
+target_col = "total load actual"
+
+# HANYA dropna pada kolom yang akan dipakai untuk Machine Learning
+df_ml = df_silver.select(numeric_features + ["city_name", target_col]).dropna()
+
+indexer = StringIndexer(inputCol="city_name", outputCol="city_indexed")
+encoder = OneHotEncoder(inputCols=["city_indexed"], outputCols=["city_encoded"])
+
+df_indexed = indexer.fit(df_ml).transform(df_ml)
+df_encoded = encoder.fit(df_indexed).transform(df_indexed)
+
+all_features = numeric_features + ["city_encoded"]
+assembler = VectorAssembler(inputCols=all_features, outputCol="features")
+df_assembled = assembler.transform(df_encoded)
+df_gold_model = df_assembled.select(F.col("features"), F.col(target_col).alias("label"))
+
+# 3. FEATURE SELECTION (Decision Tree)
+dt_eval = DecisionTreeRegressor(featuresCol="features", labelCol="label", maxDepth=5)
+dt_model_eval = dt_eval.fit(df_gold_model)
+
+importances = dt_model_eval.featureImportances.toArray()
+imp_data = [(numeric_features[i], float(importances[i])) for i in range(len(numeric_features))]
+imp_data.append(("city (encoded)", float(sum(importances[len(numeric_features):]))))
+
+df_imp = spark.createDataFrame(imp_data, ["feature", "importance"])
+df_imp.write.mode("overwrite").parquet("/data/gold/feature_importance")
+
+df_gold_model.write.mode("overwrite").parquet("/data/gold/dataset_modeling")
+print("\n=== Gold Layer Selesai ✓ ===")
+spark.stop()
+
+Eksekusi:
+bash
+docker exec -it tubes-k11-spark spark-submit /app/scripts/03_gold.py
+cat ~/tubes_k11/data/gold/dataset_modeling/*.snappy.parquet | mc pipe local/gold/dataset_modeling/data.snappy.parquet
 
