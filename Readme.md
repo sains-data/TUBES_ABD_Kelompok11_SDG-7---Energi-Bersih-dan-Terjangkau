@@ -93,6 +93,7 @@ cd ~/tubes_k11
 docker build -t tubes-k11-spark:3.5.5 .
 docker compose up -d
 ```
+---
 
 
 ## 3. Bronze Layer (MinIo Upload)
@@ -109,6 +110,7 @@ mc alias set local http://localhost:9000 admin admin123
 mc cp ~/tubes_k11/data/raw-data/energy_dataset.csv local/bronze/
 mc cp ~/tubes_k11/data/raw-data/weather_features.csv local/bronze/
 ```
+---
 
 
 ## 4. Silver Layer (Cleaning & IQR Outlier)
@@ -160,6 +162,7 @@ Eksekusi:
 docker exec -it tubes-k11-spark spark-submit /app/scripts/02_silver.py
 cat ~/tubes_k11/data/silver/energy_weather_clean/*.snappy.parquet | mc pipe local/silver/energy_weather_clean/data.snappy.parquet
 ```
+---
 
 
 ## 5. Gold Layer (One-Hot Encoding & Feature Importance)
@@ -225,6 +228,7 @@ Eksekusi:
 docker exec -it tubes-k11-spark spark-submit /app/scripts/03_gold.py
 cat ~/tubes_k11/data/gold/dataset_modeling/*.snappy.parquet | mc pipe local/gold/dataset_modeling/data.snappy.parquet
 ```
+---
 
 
 ## 6. Modeling (Decision Tree Regressor)
@@ -360,6 +364,7 @@ Eksekusi:
 ```bash
 docker exec -it tubes-k11-spark spark-submit /app/scripts/04_modeling.py
 ```
+---
 
 
 
