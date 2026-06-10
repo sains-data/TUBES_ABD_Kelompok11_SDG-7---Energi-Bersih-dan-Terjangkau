@@ -93,3 +93,19 @@ cd ~/tubes_k11
 docker build -t tubes-k11-spark:3.5.5 .
 docker compose up -d
 ```
+
+### 3. Bronze Layer (MinIo Upload)
+Buka browser di Windows, masuk ke http://localhost:9001 (Login: admin / admin123).
+Lalu buat 3 buah bucket: bronze, silver, gold.
+Serta jalankan perintah berikut di terminal:
+```bash
+cd ~/tubes_k11
+wget [https://dl.min.io/client/mc/release/linux-amd64/mc](https://dl.min.io/client/mc/release/linux-amd64/mc)
+chmod +x mc
+sudo mv mc /usr/local/bin/
+
+mc alias set local http://localhost:9000 admin admin123
+mc cp ~/tubes_k11/data/raw-data/energy_dataset.csv local/bronze/
+mc cp ~/tubes_k11/data/raw-data/weather_features.csv local/bronze/
+```
+
