@@ -227,8 +227,6 @@ cat ~/tubes_k11/data/gold/dataset_modeling/*.snappy.parquet | mc pipe local/gold
 ```
 ## 6. Modeling (Random Forest Regressor)
 
-Tahap modeling digunakan untuk membangun model prediksi beban energi menggunakan metode Random Forest Regressor. Data yang digunakan berasal dari Silver Layer, yaitu data energi dan cuaca yang sudah dibersihkan. Pada tahap ini dilakukan pemilihan fitur, pembagian data train dan test, deteksi outlier, encoding variabel kategori, normalisasi fitur, evaluasi bias-variance, serta evaluasi akhir model menggunakan R-Squared dan MAPE.
-
 Buat file script:
 
 ```bash
