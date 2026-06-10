@@ -162,14 +162,12 @@ Eksekusi:
 docker exec -it tubes-k11-spark spark-submit /app/scripts/02_silver.py
 cat ~/tubes_k11/data/silver/energy_weather_clean/*.snappy.parquet | mc pipe local/silver/energy_weather_clean/data.snappy.parquet
 ```
----
-
- 5. Gold Layer (One-Hot Encoding & Feature Importance)
-bash
+🥇 5. Gold Layer (One-Hot Encoding & Feature Importance)
+```bash
 nano ~/tubes_k11/scripts/03_gold.py
-
+```
 Isi dengan:
-bash
+```bash
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.ml.feature import VectorAssembler, StringIndexer, OneHotEncoder
@@ -221,9 +219,9 @@ df_imp.write.mode("overwrite").parquet("/data/gold/feature_importance")
 df_gold_model.write.mode("overwrite").parquet("/data/gold/dataset_modeling")
 print("\n=== Gold Layer Selesai ✓ ===")
 spark.stop()
-
+```
 Eksekusi:
-bash
+```bash
 docker exec -it tubes-k11-spark spark-submit /app/scripts/03_gold.py
 cat ~/tubes_k11/data/gold/dataset_modeling/*.snappy.parquet | mc pipe local/gold/dataset_modeling/data.snappy.parquet
-
+```
