@@ -225,3 +225,189 @@ Eksekusi:
 docker exec -it tubes-k11-spark spark-submit /app/scripts/03_gold.py
 cat ~/tubes_k11/data/gold/dataset_modeling/*.snappy.parquet | mc pipe local/gold/dataset_modeling/data.snappy.parquet
 ```
+## 6. Modeling (Random Forest Regressor)
+
+Tahap modeling digunakan untuk membangun model prediksi beban energi menggunakan metode Random Forest Regressor. Data yang digunakan berasal dari Silver Layer, yaitu data energi dan cuaca yang sudah dibersihkan. Pada tahap ini dilakukan pemilihan fitur, pembagian data train dan test, deteksi outlier, encoding variabel kategori, normalisasi fitur, evaluasi bias-variance, serta evaluasi akhir model menggunakan R-Squared dan MAPE.
+
+Buat file script:
+
+```bash
+nano ~/tubes_k11/scripts/04_modeling.py
+```
+
+Isi dengan:
+
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler, StandardScaler
+from pyspark.ml.regression import RandomForestRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import os
+
+# 1. INISIALISASI SPARK DENGAN ALOKASI RAM EKSTRA (4GB)
+spark = SparkSession.builder \
+    .appName("tubes_K11") \
+    .master("local[*]") \
+    .config("spark.driver.memory", "4g") \
+    .config("spark.executor.memory", "4g") \
+    .getOrCreate()
+
+spark.sparkContext.setLogLevel("WARN")
+
+# Baca data bersih dari Silver Layer
+df_silver = spark.read.parquet("/data/silver/energy_weather_clean")
+
+numeric_features = ["temp", "pressure", "humidity", "wind_speed", "hour", "day_of_week", "is_weekend"]
+target_col = "total load actual"
+
+# Ambil kolom yang akan dipakai untuk ML dan hapus baris kosong
+df_ml = df_silver.select(numeric_features + ["city_name", F.col(target_col).alias("label")]).dropna()
+
+print("\n=== 1. SPLIT DATA (MENCEGAH DATA LEAKAGE) ===")
+df_train, df_test = df_ml.randomSplit([0.8, 0.2], seed=42)
+df_train.cache()
+df_test.cache()
+
+print("\n=== 2. OUTLIER DETECTION (FIT HANYA PADA DATA TRAIN) ===")
+features_to_check = ["temp", "pressure", "humidity", "wind_speed"]
+bounds = {}
+
+# Hitung IQR hanya dari data Train
+for col in features_to_check:
+    quantiles = df_train.approxQuantile(col, [0.25, 0.75], 0.01)
+    IQR = quantiles[1] - quantiles[0]
+    bounds[col] = {
+        "lower": quantiles[0] - 1.5 * IQR,
+        "upper": quantiles[1] + 1.5 * IQR
+    }
+
+# Terapkan filter batas IQR ke Train dan Test
+for col in features_to_check:
+    df_train = df_train.filter((F.col(col) >= bounds[col]["lower"]) & (F.col(col) <= bounds[col]["upper"]))
+    df_test = df_test.filter((F.col(col) >= bounds[col]["lower"]) & (F.col(col) <= bounds[col]["upper"]))
+
+print("\n=== 3. ML PIPELINE (ENCODING & NORMALISASI) ===")
+
+# Pipeline memastikan transformasi tidak bocor ke data Test
+indexer = StringIndexer(inputCol="city_name", outputCol="city_indexed", handleInvalid="keep")
+encoder = OneHotEncoder(inputCols=["city_indexed"], outputCols=["city_encoded"])
+
+all_features = numeric_features + ["city_encoded"]
+assembler = VectorAssembler(inputCols=all_features, outputCol="features_assembled")
+
+scaler = StandardScaler(
+    inputCol="features_assembled",
+    outputCol="scaled_features",
+    withStd=True,
+    withMean=True
+)
+
+# Bungkus dalam satu Pipeline dan fit hanya pada Train
+pipeline = Pipeline(stages=[indexer, encoder, assembler, scaler])
+pipeline_model = pipeline.fit(df_train)
+
+# Transformasi Train dan Test menjadi matriks siap pakai
+df_train_scaled = pipeline_model.transform(df_train)
+df_test_scaled = pipeline_model.transform(df_test)
+
+print("\n=== 4. BIAS-VARIANCE TRADEOFF ===")
+
+# Menggunakan kedalaman untuk mencegah Out Of Memory
+depths = [2, 4, 6, 8, 10, 12]
+train_mse, test_mse = [], []
+
+evaluator_mse = RegressionEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="mse"
+)
+
+for d in depths:
+    rf = RandomForestRegressor(
+        featuresCol="scaled_features",
+        labelCol="label",
+        maxDepth=d,
+        numTrees=20,
+        seed=42
+    )
+
+    model = rf.fit(df_train_scaled)
+
+    train_mse.append(evaluator_mse.evaluate(model.transform(df_train_scaled)))
+    test_mse.append(evaluator_mse.evaluate(model.transform(df_test_scaled)))
+
+# Plotting grafik Bias-Variance
+os.makedirs("/data/visualisasi", exist_ok=True)
+
+plt.figure(figsize=(8, 5))
+plt.plot(depths, train_mse, marker="o", label="Train MSE (Loss)", color="blue")
+plt.plot(depths, test_mse, marker="s", label="Validation/Test MSE (Loss)", color="orange")
+plt.title("Bias-Variance Tradeoff: Random Forest")
+plt.xlabel("Kompleksitas Model (Max Depth)")
+plt.ylabel("Error (MSE)")
+plt.legend()
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.savefig("/data/visualisasi/06_bias_variance_tradeoff.png")
+plt.close()
+
+print("\n=== 5. FINAL EVALUATION ===")
+
+# Dipilih maxDepth=10 yang sering menjadi titik optimal sebelum overfitting
+final_rf = RandomForestRegressor(
+    featuresCol="scaled_features",
+    labelCol="label",
+    maxDepth=10,
+    numTrees=50,
+    seed=42
+)
+
+final_model = final_rf.fit(df_train_scaled)
+final_predictions = final_model.transform(df_test_scaled)
+
+# Evaluasi R-Squared
+evaluator_r2 = RegressionEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="r2"
+)
+
+r2_score = evaluator_r2.evaluate(final_predictions)
+
+# Evaluasi MAPE
+df_mape = final_predictions.withColumn(
+    "abs_pct_error",
+    F.abs((F.col("label") - F.col("prediction")) / F.col("label"))
+)
+
+mape_score = df_mape.agg(F.mean("abs_pct_error")).collect()[0][0] * 100
+
+print("--- HASIL AKHIR RANDOM FOREST ---")
+print(f"R-Squared (R²) : {r2_score:.4f} (Mendekati 1 semakin baik)")
+print(f"MAPE           : {mape_score:.2f}% (Semakin kecil semakin baik)")
+
+# Simpan prediksi untuk visualisasi akhir
+final_predictions.select("label", "prediction") \
+    .write.mode("overwrite") \
+    .parquet("/data/gold/predictions_rf_final")
+
+print("\n=== Modeling Selesai ✓ ===")
+spark.stop()
+```
+
+Eksekusi:
+
+```bash
+docker exec -it tubes-k11-spark spark-submit /app/scripts/04_modeling.py
+```
+
+Output yang dihasilkan:
+
+```bash
+/data/visualisasi/06_bias_variance_tradeoff.png
+/data/gold/predictions_rf_final
+```
