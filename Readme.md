@@ -1,5 +1,5 @@
 ## 1. Eksplorasi Dataset
-Berdasarkan hasil analisis eksploratif (EDA) pada *raw data*, berikut adalah karakteristik dataset yang digunakan:
+Berdasarkan hasil analisis eksploratif (EDA) pada *raw data*, berikut adalah karakteristik dataset yang digunakan: 
 * **Target Prediksi (Label):** `total load actual` (Beban listrik aktual dalam Megawatt/MW). Distribusi target ini tergolong stabil dan bersih tanpa *outlier* ekstrem.
 * **Fitur Prediktor Numerik (Cuaca & Waktu):** `temp` (suhu), `pressure` (tekanan udara), `humidity`, `wind_speed`, serta fitur waktu yang diekstrak (`hour`, `day_of_week`, `is_weekend`). 
     * *Insight Preprocessing:* Pada kolom `pressure`, terdeteksi >11.000 baris (6.6%) anomali/error sensor. Oleh karena itu, diterapkan pembersihan data menggunakan metode IQR (*Interquartile Range*) di **Silver Layer**.
@@ -24,7 +24,7 @@ wget [https://raw.githubusercontent.com/AliAristoMuthahhariParisi/ABD-TUBES/refs
 
 # Unduh instalasi Apache Spark
 cd ~/tubes_k11
-wget [https://archive.apache.org/dist/spark/spark-3.5.5/spark-3.5.5-bin-hadoop3.tgz](https://archive.apache.org/dist/spark/spark-3.5.5/spark-3.5.5-bin-hadoop3.tgz)
+wget [https://archive.apache.org/dist/spark/spark-3.5.5/spark-3.5.5-bin-hadoop3.tgz](https://archive.apache.org/dist/spark/spark-3.5.5/spark-3.5.5-bin-hadoop3.tgz) 
 ```
 
 ### 2.2 Buat Dockerfile
