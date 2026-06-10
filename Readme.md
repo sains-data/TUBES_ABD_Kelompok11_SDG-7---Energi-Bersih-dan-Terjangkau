@@ -402,10 +402,3 @@ Eksekusi:
 ```bash
 docker exec -it tubes-k11-spark spark-submit /app/scripts/04_modeling.py
 ```
-
-Output yang dihasilkan:
-
-```bash
-/data/visualisasi/06_bias_variance_tradeoff.png
-/data/gold/predictions_rf_final
-```
